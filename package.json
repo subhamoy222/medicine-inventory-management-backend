@@ -1,0 +1,20 @@
+{
+  "name": "medicine-inventory-management",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "moment": "^2.30.1",
+    "mongoose": "^7.0.0",
+    "nodemailer": "^6.10.1",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
