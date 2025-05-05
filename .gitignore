@@ -9,7 +9,7 @@ package-lock.json
 yarn.lock
 
 # Environment variables
-config/.env
+backend/config/.env
 .env
 .env.local
 .env.*.local
