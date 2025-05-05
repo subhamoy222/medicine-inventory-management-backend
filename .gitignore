@@ -1,0 +1,5 @@
+.env
+node_modules
+utils/emailService.js
+utils/socketUtils.js
+
