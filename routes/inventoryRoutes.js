@@ -169,7 +169,8 @@ import {
     getCustomerPurchases,
     updateInventoryPartyNames,
     getInventorySummary, // Assuming you exported this
-    resetInventory      // Assuming you exported this
+    resetInventory,      // Assuming you exported this
+    processSaleAndUpdateInventory // New function for updating inventory after sale
 } from '../controllers/InventoryController.js';
 import Bill from '../models/Bill.js'; // Keep if needed for party name route
 
@@ -185,6 +186,10 @@ router.get('/', isAuthenticated, getInventory); // Add authentication middleware
 // This is the endpoint your frontend should ideally use for manual adjustments
 router.post('/add-update', isAuthenticated, addOrUpdateInventoryItem); // Add authentication
 
+// --- NEW ROUTE: Update inventory after sale ---
+// POST /api/inventory/update-after-sale - Process a sale and update inventory
+router.post('/update-after-sale', isAuthenticated, processSaleAndUpdateInventory);
+
 // --- Utility / Specific Routes ---
 
 // PUT /api/inventory/update-party-names - Utility to fix missing party names (reactive)
@@ -198,8 +203,8 @@ router.get('/search', isAuthenticated, async (req, res) => {
     const { itemName, batch, email } = req.query;
     // ... (keep existing logic, but ensure email is required and validated) ...
      if (!email) {
-      return res.status(400).json({ message: 'Email is required to search inventory' });
-    }
+      return res.status(400).json({ message: 'Email is required to search inventory' });
+    }
     // ... find logic ...
      try {
         const query = { email };
@@ -224,18 +229,18 @@ router.get('/party-names/:email', isAuthenticated, async (req, res) => {
     const { email } = req.params;
     console.log('Fetching party names for email:', email);
      try {
-    // Get all inventory items for the email
-    const inventoryItems = await Inventory.find({ email }).select('partyName'); // Select only partyName
-    // Get all purchase bills for the email
-    const purchaseBills = await Bill.find({ email, billType: 'purchase' }).select('partyName'); // Select only partyName
-    
-    // Extract unique party names, filter out null/empty strings
-    const inventoryPartyNames = new Set(inventoryItems.map(item => item.partyName).filter(Boolean));
-    const purchaseBillPartyNames = new Set(purchaseBills.map(bill => bill.partyName).filter(Boolean));
-    
-    const allPartyNames = [...new Set([...inventoryPartyNames, ...purchaseBillPartyNames])].sort(); // Sort alphabetically
-    console.log('All unique party names:', allPartyNames);
-    res.status(200).json(allPartyNames);
+    // Get all inventory items for the email
+    const inventoryItems = await Inventory.find({ email }).select('partyName'); // Select only partyName
+    // Get all purchase bills for the email
+    const purchaseBills = await Bill.find({ email, billType: 'purchase' }).select('partyName'); // Select only partyName
+    
+    // Extract unique party names, filter out null/empty strings
+    const inventoryPartyNames = new Set(inventoryItems.map(item => item.partyName).filter(Boolean));
+    const purchaseBillPartyNames = new Set(purchaseBills.map(bill => bill.partyName).filter(Boolean));
+    
+    const allPartyNames = [...new Set([...inventoryPartyNames, ...purchaseBillPartyNames])].sort(); // Sort alphabetically
+    console.log('All unique party names:', allPartyNames);
+    res.status(200).json(allPartyNames);
      } catch (error) {
          // ... error handling ...
          console.error('Error fetching party names:', error.message);
@@ -246,39 +251,8 @@ router.get('/party-names/:email', isAuthenticated, async (req, res) => {
 // GET /api/inventory/customer/:customerName - Get purchase history for a customer
 router.get('/customer/:customerName', isAuthenticated, getCustomerPurchases); // Requires email in query
 
-
-// --- Potentially Redundant/Risky Routes (Consider Removing) ---
-
-/*
-// POST /api/inventory/ - Basic item creation (Bypasses addOrUpdate logic)
-// REMOVE this if you want all additions to go through addOrUpdateInventoryItem
-router.post('/', isAuthenticated, async (req, res) => {
-  try {
-    console.log('Attempting direct inventory creation (WARNING: Bypasses consolidation logic):', req.body);
-    const newItem = new Inventory(req.body);
-    const savedItem = await newItem.save();
-    res.status(201).json(savedItem);
-  } catch (error) {
-    console.error('Error creating inventory item directly:', error.message);
-    res.status(500).json({ message: 'Error creating inventory item', error: error.message });
-  }
-});
-
-// PUT /api/inventory/:id - Basic update by ID (Bypasses consolidation logic)
-// REMOVE or modify if needed, but be aware it doesn't consolidate quantity.
-router.put('/:id', isAuthenticated, async (req, res) => {
-    // ... existing logic ...
-});
-
-// DELETE /api/inventory/:id - Basic delete by ID (Generally OK)
-router.delete('/:id', isAuthenticated, async (req, res) => {
-    // ... existing logic ...
-});
-*/
-
 // POST /api/inventory/reset - For testing
 router.post('/reset', isAuthenticated, resetInventory); // Use POST for destructive action
-
 
 export default router;
 

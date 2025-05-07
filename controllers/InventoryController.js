@@ -1,3 +1,4 @@
+
 import CustomerPurchase from '../models/CustomerPurchase.js';
 import Inventory from '../models/Inventory.js';
 import ReturnBill from '../models/ReturnBillSchema.js';
@@ -184,6 +185,101 @@ async function updateInventoryInternalWithFixedPartyName(
         throw dbError;
     }
 }
+
+// --- NEW FUNCTION: Update inventory after sales ---
+export async function updateInventoryAfterSale(saleData) {
+    try {
+        console.log('[updateInventoryAfterSale] Processing sale data:', JSON.stringify(saleData, null, 2));
+        
+        if (!saleData || !saleData.items || !Array.isArray(saleData.items) || !saleData.email) {
+            console.error('[updateInventoryAfterSale] Invalid sale data:', saleData);
+            throw new Error('Invalid sale data structure');
+        }
+        
+        const updates = [];
+        
+        // Process each item in the sale
+        for (const item of saleData.items) {
+            console.log(`[updateInventoryAfterSale] Processing item: ${item.itemName}, batch: ${item.batch}, quantity: ${item.quantity}`);
+            
+            if (!item.itemName || !item.batch || !item.quantity) {
+                console.error('[updateInventoryAfterSale] Invalid item data:', item);
+                continue; // Skip invalid items
+            }
+            
+            // Find the inventory item
+            const inventoryItem = await Inventory.findOne({
+                email: saleData.email,
+                itemName: { $regex: new RegExp(`^${item.itemName.trim()}$`, 'i') },
+                batch: { $regex: new RegExp(`^${item.batch.trim()}$`, 'i') }
+            });
+            
+            if (!inventoryItem) {
+                console.error(`[updateInventoryAfterSale] Inventory item not found: ${item.itemName} (${item.batch})`);
+                continue; // Skip items not found
+            }
+            
+            // Calculate new quantity (reduce by sold amount)
+            const quantityToReduce = parseFloat(item.quantity);
+            
+            if (isNaN(quantityToReduce) || quantityToReduce <= 0) {
+                console.error(`[updateInventoryAfterSale] Invalid quantity: ${item.quantity}`);
+                continue;
+            }
+            
+            const originalQuantity = inventoryItem.quantity;
+            const newQuantity = originalQuantity - quantityToReduce;
+            
+            if (newQuantity < 0) {
+                console.error(`[updateInventoryAfterSale] Insufficient inventory for ${item.itemName} (${item.batch}). Available: ${originalQuantity}, Requested: ${quantityToReduce}`);
+                continue;
+            }
+            
+            // Update the inventory
+            console.log(`[updateInventoryAfterSale] Updating inventory for ${item.itemName} (${item.batch}): ${originalQuantity} -> ${newQuantity}`);
+            inventoryItem.quantity = newQuantity;
+            await inventoryItem.save();
+            
+            updates.push({
+                itemName: item.itemName,
+                batch: item.batch,
+                oldQuantity: originalQuantity,
+                newQuantity: newQuantity,
+                reduced: quantityToReduce
+            });
+        }
+        
+        // Emit inventory update event
+        emitToUser(saleData.email, SOCKET_EVENTS.INVENTORY_UPDATE, {
+            message: 'Inventory updated after sale',
+            updates,
+            timestamp: new Date().toISOString()
+        });
+        
+        return updates;
+    } catch (error) {
+        console.error('[updateInventoryAfterSale] Error:', error);
+        throw error;
+    }
+}
+
+// --- Endpoint Function for Sale Transaction ---
+export const processSaleAndUpdateInventory = async (req, res) => {
+    try {
+        const saleData = req.body;
+        
+        if (!saleData || !saleData.email || !saleData.items || !Array.isArray(saleData.items)) {
+            return res.status(400).json({ message: 'Invalid sale data' });
+        }
+        
+        const updates = await updateInventoryAfterSale(saleData);
+        res.status(200).json({ message: 'Inventory updated after sale', updates });
+    } catch (error) {
+        console.error('[processSaleAndUpdateInventory] Error:', error);
+        res.status(500).json({ message: 'Error updating inventory after sale', error: error.message });
+    }
+};
+
 // --- Endpoint Function ---
 export const addOrUpdateInventoryItem = async (req, res) => {
     try {
@@ -267,6 +363,7 @@ async function enrichInventoryWithBillData(inventoryItems, email) {
         return itemObj;
     });
 }
+
 
 // --- Helper: Consolidate Inventory ---
 async function consolidateInventoryItems(email) { /* ... Keep definition ... */ }
