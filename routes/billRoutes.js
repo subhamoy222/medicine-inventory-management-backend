@@ -30,7 +30,7 @@ router.post('/return', isAuthenticated, createReturnBill);
 router.get('/sale-bill/:billId', isAuthenticated, getSaleBillDetails);
 router.get('/batch-details', isAuthenticated, getBatchDetails);
 router.get('/purchase-history', isAuthenticated, getPurchaseHistory);
-router.get('/next-invoice', isAuthenticated, getNextInvoiceNumber);
+router.get('/next-invoice-number', isAuthenticated, getNextInvoiceNumber);
 router.get('/medicine-sales', isAuthenticated, getMedicineSalesDetails);
 router.get('/medicines-by-party', isAuthenticated, getMedicinesByParty);
 router.get('/clients', isAuthenticated, getClientsList);
