@@ -1702,84 +1702,116 @@ export const getCustomerPurchases = async (req, res) => {
 
 // Get the next invoice number
 export const getNextInvoiceNumber = async (req, res) => {
-    try {
-        const { email } = req.body;
-        // Prefer email from authenticated user (req.user set by middleware)
-        const userEmail = req.user?.email || email;
+  try {
+      const { email } = req.body;
+      // Prefer email from authenticated user (req.user set by middleware)
+      const userEmail = req.user?.email || email;
 
-        console.log("Request for next invoice number. User Email:", userEmail);
+      console.log("Request for next invoice number. User Email:", userEmail);
 
-        if (!userEmail) {
-            console.log("Email is missing in request");
-            return res.status(400).json({ message: "Email is required" });
-        }
+      if (!userEmail) {
+          console.log("Email is missing in request");
+          return res.status(400).json({ message: "Email is required" });
+      }
 
-        // --- Use Aggregation to reliably find the highest numeric part ---
-        const result = await SaleBill.aggregate([
-            // 1. Match relevant bills for the user with the expected format 'INV' + digits
-            {
-                $match: {
-                    email: userEmail,
-                    saleInvoiceNumber: { $regex: /^INV\d+$/ } // Ensures format INV followed by numbers
-                }
-            },
-            // 2. Extract the numeric part and convert to integer
-            {
-                $project: {
-                    numericPart: {
-                        $toInt: {
-                            // Extract substring starting from 4th char (index 3) to the end
-                            $substrBytes: ["$saleInvoiceNumber", 3, -1]
-                        }
-                    }
-                }
-            },
-            // 3. Sort numerically by the extracted number, descending
-            { $sort: { numericPart: -1 } },
-            // 4. Limit to the highest one
-            { $limit: 1 }
-        ]);
-        // --- End Aggregation ---
+      // --- Use Aggregation with more flexible matching ---
+      const result = await SaleBill.aggregate([
+          // 1. Match documents for this user
+          { $match: { email: userEmail } },
+          
+          // 2. Match only invoices with the proper format
+          { $match: { saleInvoiceNumber: { $regex: /^INV\d+$/ } } },
+          
+          // 3. Create a field with the numeric part extracted and converted to integer
+          {
+              $addFields: {
+                  numericPart: {
+                      $toInt: {
+                          $regexFind: {
+                              input: "$saleInvoiceNumber",
+                              regex: /\d+$/
+                          }.match
+                      }
+                  }
+              }
+          },
+          
+          // 4. Sort by this numeric field in descending order
+          { $sort: { numericPart: -1 } },
+          
+          // 5. Only take the highest one
+          { $limit: 1 },
+          
+          // 6. Project just the numeric part we need
+          { $project: { numericPart: 1, _id: 0 } }
+      ]);
 
+      let lastNumber = 0; // Default start
+      
+      // Check if we got a valid result
+      if (result.length > 0 && result[0].numericPart !== undefined && !isNaN(result[0].numericPart)) {
+          lastNumber = parseInt(result[0].numericPart, 10);
+          console.log("Found last invoice number's numeric part:", lastNumber);
+      } else {
+          // Fallback: If the aggregation fails, try a simpler query
+          console.log("Aggregation didn't return results, trying regular find query...");
+          
+          const lastInvoice = await SaleBill.findOne({ 
+              email: userEmail,
+              saleInvoiceNumber: { $regex: /^INV\d+$/ }
+          }).sort({ createdAt: -1 });
+          
+          if (lastInvoice && lastInvoice.saleInvoiceNumber) {
+              // Extract the numeric part using regex
+              const match = lastInvoice.saleInvoiceNumber.match(/^INV(\d+)$/);
+              if (match && match[1]) {
+                  lastNumber = parseInt(match[1], 10);
+                  console.log("Found last invoice from regular query:", lastNumber);
+              }
+          } else {
+              console.log("No previous valid invoice found, starting sequence from 0.");
+          }
+      }
 
-        let lastNumber = 0; // Default sequence start (next will be 1)
-        // Check if aggregation returned a result and numericPart is valid
-        if (result.length > 0 && result[0].numericPart != null && !isNaN(result[0].numericPart)) {
-            lastNumber = result[0].numericPart;
-            console.log("Found last invoice number's numeric part:", lastNumber);
-        } else {
-            console.log("No previous valid invoice found or numeric part extraction failed, starting sequence from 0.");
-        }
+      // Ensure lastNumber is a valid number
+      if (isNaN(lastNumber)) {
+          console.log("Warning: lastNumber is NaN, resetting to 0");
+          lastNumber = 0;
+      }
 
-        // Calculate the next number
-        const nextNumber = lastNumber + 1;
-        console.log("Calculated next number:", nextNumber);
+      // Calculate the next number
+      const nextNumber = lastNumber + 1;
+      console.log("Calculated next number:", nextNumber);
 
-        // Format the next invoice number (e.g., INV001, INV010, INV100)
-        // padStart(3, '0') ensures at least 3 digits for the number part
-        const invoiceNumber = `INV${String(nextNumber).padStart(3, '0')}`;
-        console.log("Generated invoice number:", invoiceNumber);
+      // Format the next invoice number (e.g., INV001, INV010, INV100)
+      const invoiceNumber = `INV${String(nextNumber).padStart(3, '0')}`;
+      console.log("Generated invoice number:", invoiceNumber);
 
-        // Send the successfully generated number
-        res.status(200).json({ invoiceNumber });
+      // Send the successfully generated number
+      return res.status(200).json({ invoiceNumber });
 
-    } catch (error) {
-        console.error('Error in getNextInvoiceNumber:', error);
-        // Handle specific errors like conversion errors if needed
-        if (error.message.includes('convert')) {
-             return res.status(500).json({
-                 message: 'Error converting existing invoice number part to integer. Check data format in DB.',
-                 error: error.message,
-             });
-        }
-        // Generic error response
-        res.status(500).json({
-            message: 'Error getting next invoice number',
-            error: error.message,
-            // Optionally include stack in development
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
-    }
+  } catch (error) {
+      console.error('Error in getNextInvoiceNumber:', error);
+      
+      // More detailed error handling
+      if (error.name === 'MongoServerError') {
+          return res.status(500).json({
+              message: 'Database server error',
+              error: error.message
+          });
+      } else if (error.name === 'ValidationError') {
+          return res.status(400).json({
+              message: 'Validation error',
+              error: error.message
+          });
+      }
+      
+      // Generic error response
+      return res.status(500).json({
+          message: 'Error getting next invoice number',
+          error: error.message
+      });
+  }
 };
 export const getMedicineSalesDetails = async (req, res) => {
     try {
