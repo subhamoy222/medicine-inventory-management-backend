@@ -1722,15 +1722,16 @@ export const getNextInvoiceNumber = async (req, res) => {
           // 2. Match only invoices with the proper format
           { $match: { saleInvoiceNumber: { $regex: /^INV\d+$/ } } },
           
-          // 3. Create a field with the numeric part extracted and converted to integer
+          // 3. Create a field with the numeric part extracted using substring
           {
-              $addFields: {
+              $project: {
                   numericPart: {
                       $toInt: {
-                          $regexFind: {
-                              input: "$saleInvoiceNumber",
-                              regex: /\d+$/
-                          }.match
+                          $substr: [
+                              "$saleInvoiceNumber", 
+                              3, 
+                              { $subtract: [{ $strLenCP: "$saleInvoiceNumber" }, 3] }
+                          ]
                       }
                   }
               }
@@ -1740,10 +1741,7 @@ export const getNextInvoiceNumber = async (req, res) => {
           { $sort: { numericPart: -1 } },
           
           // 5. Only take the highest one
-          { $limit: 1 },
-          
-          // 6. Project just the numeric part we need
-          { $project: { numericPart: 1, _id: 0 } }
+          { $limit: 1 }
       ]);
 
       let lastNumber = 0; // Default start
@@ -1813,6 +1811,7 @@ export const getNextInvoiceNumber = async (req, res) => {
       });
   }
 };
+
 export const getMedicineSalesDetails = async (req, res) => {
     try {
         const { medicineName, startDate, endDate, partyName } = req.query;
