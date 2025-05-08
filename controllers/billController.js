@@ -560,276 +560,569 @@ export const createPurchaseBill = async (req, res) => {
 
 
 
+// export const createSaleBill = async (req, res) => {
+//     try {
+//         // Destructure fields defined in the newer schema/payload
+//         const { saleInvoiceNumber, date, receiptNumber, partyName, items, gstNumber, // Top-level GST
+//                 // Get overall totals calculated by frontend
+//                 totalAmount: feTotalAmount,
+//                 discountAmount: feDiscountAmount,
+//                 sgstAmount: feSgstAmount,
+//                 cgstAmount: feCgstAmount,
+//                 igstAmount: feIgstAmount,
+//                 totalGstAmount: feTotalGstAmount,
+//                 netAmount: feNetAmount } = req.body;
+//         const email = req.user.email; // Assuming middleware adds user object
+
+//         if (!email) {
+//             return res.status(400).json({ message: 'User email is required (authentication error)' });
+//         }
+
+//         // Validate required top-level fields
+//         if (!saleInvoiceNumber || !date || !receiptNumber || !partyName || !items || !items.length || !gstNumber) {
+//             // Added detailed check for items array content
+//              if (!items || !Array.isArray(items) || items.length === 0) {
+//                 return res.status(400).json({ message: 'Items array cannot be empty' });
+//              }
+//              // If items exist but other fields missing
+//             return res.status(400).json({ message: 'Missing required fields (invoice#, date, receipt#, party, items, gstNumber)' });
+//         }
+
+//         // **Removed the incorrect item.gstNo check logic**
+
+//         // Initialize variables for server-side calculation/validation if needed,
+//         // but primarily trust frontend calculations if they match schema totals.
+//         const processedItems = [];
+
+//         // Process items, validate inventory, and prepare items for saving
+//         for (const item of items) {
+//             // Destructure fields expected per item from the NEW schema/payload
+//             const { itemName, batch, quantity, mrp, discount, gstPercentage, expiryDate,
+//                     sgst, cgst, igst, totalGst, netAmount } = item; // Get all relevant fields
+
+//             // --- Basic Item Validation ---
+//             if (!itemName || !batch || quantity == null || mrp == null || discount == null || gstPercentage == null || expiryDate == null || sgst == null || cgst == null || igst == null || totalGst == null || netAmount == null ) {
+//                  // Log the specific item causing the issue for easier debugging
+//                 console.error("Validation failed for item:", item);
+//                 return res.status(400).json({ message: `Missing required fields in item: ${itemName} (${batch})` });
+//             }
+
+//             // Convert necessary fields to numbers for checks/calculations
+//             const parsedQuantity = Number(quantity);
+//             const parsedMrp = Number(mrp);
+//             const parsedDiscount = Number(discount);
+//             const parsedGstPercentage = Number(gstPercentage);
+//              // Also parse received amounts for potential validation/recalculation
+//             const parsedNetAmount = Number(netAmount);
+//             const parsedTotalGst = Number(totalGst);
+
+//             // Validate numeric values (ensure they are numbers and within reasonable ranges)
+//             if (isNaN(parsedQuantity) || isNaN(parsedMrp) || isNaN(parsedDiscount) || isNaN(parsedGstPercentage) || isNaN(parsedNetAmount) || isNaN(parsedTotalGst) ) {
+//                 console.error("NaN value detected in item:", item);
+//                 return res.status(400).json({ message: `Invalid numeric values in item: ${itemName} (${batch})` });
+//             }
+//             if (parsedQuantity <= 0 || parsedMrp < 0 || parsedDiscount < 0 || parsedGstPercentage < 0) {
+//                  console.error("Invalid range in item:", item);
+//                  return res.status(400).json({ message: `Invalid values: Quantity must be >0, MRP/Discount/GST% >=0 in item: ${itemName} (${batch})` });
+//             }
+//             // --- End Basic Item Validation ---
+
+
+//             // --- Inventory Check & Update ---
+//             // Find all inventory entries matching item, batch, and user email
+//             const inventoryItems = await Inventory.find({
+//                 email,
+//                 // Use case-insensitive regex for matching flexibility
+//                 itemName: { $regex: new RegExp(`^${itemName}$`, 'i') },
+//                 batch: { $regex: new RegExp(`^${batch}$`, 'i') }
+//             }).sort({ expiryDate: 1 }); // Sort by expiry (FIFO for deduction)
+
+//             if (!inventoryItems.length) {
+//                 return res.status(400).json({ message: `Item ${itemName} (Batch: ${batch}) not found in inventory` });
+//             }
+
+//             // Calculate total available quantity across found inventory entries
+//             const totalAvailableQuantity = inventoryItems.reduce((sum, inv) => sum + inv.quantity, 0);
+
+//             // Check if sufficient stock exists
+//             if (totalAvailableQuantity < parsedQuantity) {
+//                 return res.status(400).json({ message: `Insufficient stock for ${itemName} (Batch: ${batch}). Available: ${totalAvailableQuantity}, Requested: ${parsedQuantity}` });
+//             }
+
+//             // Deduct quantity from inventory items (FIFO based on sort)
+//             let remainingQuantityToDeduct = parsedQuantity;
+//             let actualExpiryDate = inventoryItems[0].expiryDate; // Get expiry from the first (oldest) inventory item
+//             for (const inventoryItem of inventoryItems) {
+//                 if (remainingQuantityToDeduct <= 0) break;
+
+//                 const quantityToDeductFromThis = Math.min(remainingQuantityToDeduct, inventoryItem.quantity);
+//                 inventoryItem.quantity -= quantityToDeductFromThis;
+//                 remainingQuantityToDeduct -= quantityToDeductFromThis;
+
+//                  // Decide whether to remove item or update quantity
+//                  if (inventoryItem.quantity <= 0) {
+//                      // Optional: Remove the inventory item if quantity is zero
+//                      // await Inventory.findByIdAndDelete(inventoryItem._id);
+//                      // Or just save it with quantity 0 if you prefer to keep the record
+//                      await inventoryItem.save();
+//                  } else {
+//                      await inventoryItem.save(); // Save updated quantity
+//                  }
+//             }
+//             // --- End Inventory Check & Update ---
+
+
+//             // --- Prepare Item for Saving (Matching Schema) ---
+//             // This object structure MUST match the Mongoose schema definition for `items`
+//             processedItems.push({
+//                 itemName: itemName,
+//                 batch: batch,
+//                 quantity: parsedQuantity,
+//                 mrp: parsedMrp,
+//                 discount: parsedDiscount,
+//                 gstPercentage: parsedGstPercentage,
+//                 expiryDate: actualExpiryDate, // Use expiry from inventory
+//                 // Use the pre-calculated values sent from frontend
+//                 sgst: Number(sgst) || 0,
+//                 cgst: Number(cgst) || 0,
+//                 igst: Number(igst) || 0,
+//                 totalGst: parsedTotalGst, // Use totalGst from payload
+//                 netAmount: parsedNetAmount // Use netAmount from payload
+//                 // **Removed the extra 'amount: taxableValue' field**
+//             });
+//         } // End of item loop
+
+//         // --- Create and Save Sale Bill ---
+//         // Use the overall totals sent from the frontend payload
+//         const newBill = new SaleBill({
+//             saleInvoiceNumber, date, receiptNumber, partyName, email, gstNumber,
+//             items: processedItems, // Use the correctly structured items
+//             // Assign overall totals from the request body
+//             totalAmount: feTotalAmount,
+//             discountAmount: feDiscountAmount,
+//             sgstAmount: feSgstAmount,
+//             cgstAmount: feCgstAmount,
+//             igstAmount: feIgstAmount,
+//             totalGstAmount: feTotalGstAmount,
+//             netAmount: feNetAmount
+//         });
+
+//         const savedBill = await newBill.save(); // Mongoose validation happens here
+//         // --- End Create and Save Sale Bill ---
+
+
+//         // --- Update Customer Purchase History (Optional) ---
+//         try {
+//              let customerPurchase = await CustomerPurchase.findOne({ gstNo: gstNumber, email: email }); // Added email scope
+//              if (!customerPurchase) {
+//                  customerPurchase = new CustomerPurchase({ gstNo: gstNumber, partyName, email, purchaseHistory: [] });
+//              }
+
+//              customerPurchase.purchaseHistory.push({
+//                  date: new Date(),
+//                  invoiceNumber: saleInvoiceNumber,
+//                  items: processedItems.map(item => ({ // Map processed items for history
+//                      itemName: item.itemName,
+//                      batch: item.batch,
+//                      quantity: item.quantity,
+//                      rate: item.mrp, // Use MRP as rate?
+//                      discount: item.discount,
+//                      gstPercentage: item.gstPercentage,
+//                      expiryDate: item.expiryDate,
+//                      amount: item.netAmount // Use netAmount per item
+//                  })),
+//                  totalAmount: feNetAmount // Use overall net amount for this purchase record
+//              });
+//              await customerPurchase.save();
+//              console.log(`Customer purchase history updated for GSTIN: ${gstNumber}`);
+//         } catch(custError) {
+//             // Log error but don't fail the entire sale if customer history update fails
+//             console.error(`Error updating customer purchase history for ${gstNumber}:`, custError);
+//         }
+//         // --- End Update Customer Purchase History ---
+
+//         // --- Emit real-time updates via WebSocket ---
+//         try {
+//           // Calculate today's and this month's sales totals
+//           const today = new Date();
+//           today.setHours(0, 0, 0, 0);
+//           const tomorrow = new Date(today);
+//           tomorrow.setDate(tomorrow.getDate() + 1);
+          
+//           const dailySales = await SaleBill.aggregate([
+//             {
+//               $match: {
+//                 email: email,
+//                 date: { $gte: today, $lt: tomorrow }
+//               }
+//             },
+//             {
+//               $group: {
+//                 _id: null,
+//                 totalAmount: { $sum: '$netAmount' }
+//               }
+//             }
+//           ]);
+          
+//           const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+//           const firstDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+          
+//           const monthlySales = await SaleBill.aggregate([
+//             {
+//               $match: {
+//                 email: email,
+//                 date: { $gte: firstDayOfMonth, $lt: firstDayOfNextMonth }
+//               }
+//             },
+//             {
+//               $group: {
+//                 _id: null,
+//                 totalAmount: { $sum: '$netAmount' }
+//               }
+//             }
+//           ]);
+          
+//           // Count unique customers this month
+//           const uniqueCustomers = await SaleBill.distinct('partyName', {
+//             email: email,
+//             date: { $gte: firstDayOfMonth, $lt: firstDayOfNextMonth }
+//           });
+          
+//           // Format currency values
+//           const formatCurrency = (value) => {
+//             return `₹${value.toLocaleString('en-IN')}`;
+//           };
+          
+//           // Emit dashboard update with sales data
+//           emitToUser(email, SOCKET_EVENTS.DASHBOARD_UPDATE, {
+//             dailySales: formatCurrency(dailySales.length > 0 ? dailySales[0].totalAmount : 0),
+//             monthlySales: formatCurrency(monthlySales.length > 0 ? monthlySales[0].totalAmount : 0),
+//             activeCustomers: uniqueCustomers.length,
+//             timestamp: new Date().toISOString()
+//           });
+          
+//           console.log(`Real-time dashboard update emitted for user: ${email}`);
+//         } catch (wsError) {
+//           // Don't fail the sale if WebSocket emission fails
+//           console.error('Error emitting real-time updates:', wsError);
+//         }
+//         // --- End WebSocket updates ---
+
+//         // --- Send Success Response ---
+//         return res.status(201).json({
+//             message: 'Sale bill created successfully',
+//             bill: savedBill,
+//             inventoryUpdated: true,
+//             customerRecordUpdated: true // Indicate history update attempted/succeeded
+//         });
+
+//     } catch (error) {
+//         // --- Handle Errors ---
+//         console.error('Error creating sale bill:', error);
+//         // Check for Mongoose validation errors specifically
+//         if (error.name === 'ValidationError') {
+//             // Extract meaningful messages from validation errors
+//             const messages = Object.values(error.errors).map(val => val.message);
+//             return res.status(400).json({ message: messages.join(', '), error: error.message });
+//         }
+//         // Generic server error
+//         return res.status(500).json({ message: 'Internal server error', error: error.message });
+//     }
+// };
+
+
+// Modified createSaleBill function with improved inventory handling
 export const createSaleBill = async (req, res) => {
-    try {
-        // Destructure fields defined in the newer schema/payload
-        const { saleInvoiceNumber, date, receiptNumber, partyName, items, gstNumber, // Top-level GST
-                // Get overall totals calculated by frontend
-                totalAmount: feTotalAmount,
-                discountAmount: feDiscountAmount,
-                sgstAmount: feSgstAmount,
-                cgstAmount: feCgstAmount,
-                igstAmount: feIgstAmount,
-                totalGstAmount: feTotalGstAmount,
-                netAmount: feNetAmount } = req.body;
-        const email = req.user.email; // Assuming middleware adds user object
+  try {
+      // Destructure fields defined in the newer schema/payload
+      const { saleInvoiceNumber, date, receiptNumber, partyName, items, gstNumber, // Top-level GST
+              // Get overall totals calculated by frontend
+              totalAmount: feTotalAmount,
+              discountAmount: feDiscountAmount,
+              sgstAmount: feSgstAmount,
+              cgstAmount: feCgstAmount,
+              igstAmount: feIgstAmount,
+              totalGstAmount: feTotalGstAmount,
+              netAmount: feNetAmount } = req.body;
+      const email = req.user.email; // Assuming middleware adds user object
 
-        if (!email) {
-            return res.status(400).json({ message: 'User email is required (authentication error)' });
-        }
+      if (!email) {
+          return res.status(400).json({ message: 'User email is required (authentication error)' });
+      }
 
-        // Validate required top-level fields
-        if (!saleInvoiceNumber || !date || !receiptNumber || !partyName || !items || !items.length || !gstNumber) {
-            // Added detailed check for items array content
-             if (!items || !Array.isArray(items) || items.length === 0) {
-                return res.status(400).json({ message: 'Items array cannot be empty' });
-             }
-             // If items exist but other fields missing
-            return res.status(400).json({ message: 'Missing required fields (invoice#, date, receipt#, party, items, gstNumber)' });
-        }
+      // Validate required top-level fields
+      if (!saleInvoiceNumber || !date || !receiptNumber || !partyName || !items || !items.length || !gstNumber) {
+          // Added detailed check for items array content
+           if (!items || !Array.isArray(items) || items.length === 0) {
+              return res.status(400).json({ message: 'Items array cannot be empty' });
+           }
+           // If items exist but other fields missing
+          return res.status(400).json({ message: 'Missing required fields (invoice#, date, receipt#, party, items, gstNumber)' });
+      }
 
-        // **Removed the incorrect item.gstNo check logic**
+      // Initialize variables for server-side calculation/validation if needed,
+      // but primarily trust frontend calculations if they match schema totals.
+      const processedItems = [];
 
-        // Initialize variables for server-side calculation/validation if needed,
-        // but primarily trust frontend calculations if they match schema totals.
-        const processedItems = [];
+      // Prepare inventory validation data first (to avoid partial processing)
+      const inventoryCheckResults = [];
+      for (const item of items) {
+          // Destructure fields expected per item from the NEW schema/payload
+          const { itemName, batch, quantity, mrp, discount, gstPercentage, expiryDate,
+                  sgst, cgst, igst, totalGst, netAmount } = item; // Get all relevant fields
 
-        // Process items, validate inventory, and prepare items for saving
-        for (const item of items) {
-            // Destructure fields expected per item from the NEW schema/payload
-            const { itemName, batch, quantity, mrp, discount, gstPercentage, expiryDate,
-                    sgst, cgst, igst, totalGst, netAmount } = item; // Get all relevant fields
+          // --- Basic Item Validation ---
+          if (!itemName || !batch || quantity == null || mrp == null || discount == null || gstPercentage == null || expiryDate == null || sgst == null || cgst == null || igst == null || totalGst == null || netAmount == null ) {
+               // Log the specific item causing the issue for easier debugging
+              console.error("Validation failed for item:", item);
+              return res.status(400).json({ message: `Missing required fields in item: ${itemName} (${batch})` });
+          }
 
-            // --- Basic Item Validation ---
-            if (!itemName || !batch || quantity == null || mrp == null || discount == null || gstPercentage == null || expiryDate == null || sgst == null || cgst == null || igst == null || totalGst == null || netAmount == null ) {
-                 // Log the specific item causing the issue for easier debugging
-                console.error("Validation failed for item:", item);
-                return res.status(400).json({ message: `Missing required fields in item: ${itemName} (${batch})` });
-            }
+          // Convert necessary fields to numbers for checks/calculations
+          const parsedQuantity = Number(quantity);
+          const parsedMrp = Number(mrp);
+          const parsedDiscount = Number(discount);
+          const parsedGstPercentage = Number(gstPercentage);
+           // Also parse received amounts for potential validation/recalculation
+          const parsedNetAmount = Number(netAmount);
+          const parsedTotalGst = Number(totalGst);
 
-            // Convert necessary fields to numbers for checks/calculations
-            const parsedQuantity = Number(quantity);
-            const parsedMrp = Number(mrp);
-            const parsedDiscount = Number(discount);
-            const parsedGstPercentage = Number(gstPercentage);
-             // Also parse received amounts for potential validation/recalculation
-            const parsedNetAmount = Number(netAmount);
-            const parsedTotalGst = Number(totalGst);
+          // Validate numeric values (ensure they are numbers and within reasonable ranges)
+          if (isNaN(parsedQuantity) || isNaN(parsedMrp) || isNaN(parsedDiscount) || isNaN(parsedGstPercentage) || isNaN(parsedNetAmount) || isNaN(parsedTotalGst) ) {
+              console.error("NaN value detected in item:", item);
+              return res.status(400).json({ message: `Invalid numeric values in item: ${itemName} (${batch})` });
+          }
+          if (parsedQuantity <= 0 || parsedMrp < 0 || parsedDiscount < 0 || parsedGstPercentage < 0) {
+               console.error("Invalid range in item:", item);
+               return res.status(400).json({ message: `Invalid values: Quantity must be >0, MRP/Discount/GST% >=0 in item: ${itemName} (${batch})` });
+          }
+          // --- End Basic Item Validation ---
 
-            // Validate numeric values (ensure they are numbers and within reasonable ranges)
-            if (isNaN(parsedQuantity) || isNaN(parsedMrp) || isNaN(parsedDiscount) || isNaN(parsedGstPercentage) || isNaN(parsedNetAmount) || isNaN(parsedTotalGst) ) {
-                console.error("NaN value detected in item:", item);
-                return res.status(400).json({ message: `Invalid numeric values in item: ${itemName} (${batch})` });
-            }
-            if (parsedQuantity <= 0 || parsedMrp < 0 || parsedDiscount < 0 || parsedGstPercentage < 0) {
-                 console.error("Invalid range in item:", item);
-                 return res.status(400).json({ message: `Invalid values: Quantity must be >0, MRP/Discount/GST% >=0 in item: ${itemName} (${batch})` });
-            }
-            // --- End Basic Item Validation ---
+          // Find all inventory entries matching item, batch, and user email
+          const inventoryItems = await Inventory.find({
+              email,
+              // Use case-insensitive regex for matching flexibility
+              itemName: { $regex: new RegExp(`^${itemName}$`, 'i') },
+              batch: { $regex: new RegExp(`^${batch}$`, 'i') }
+          }).sort({ expiryDate: 1 }); // Sort by expiry (FIFO for deduction)
 
+          if (!inventoryItems.length) {
+              return res.status(400).json({ message: `Item ${itemName} (Batch: ${batch}) not found in inventory` });
+          }
 
-            // --- Inventory Check & Update ---
-            // Find all inventory entries matching item, batch, and user email
-            const inventoryItems = await Inventory.find({
-                email,
-                // Use case-insensitive regex for matching flexibility
-                itemName: { $regex: new RegExp(`^${itemName}$`, 'i') },
-                batch: { $regex: new RegExp(`^${batch}$`, 'i') }
-            }).sort({ expiryDate: 1 }); // Sort by expiry (FIFO for deduction)
+          // Calculate total available quantity across found inventory entries
+          const totalAvailableQuantity = inventoryItems.reduce((sum, inv) => sum + inv.quantity, 0);
 
-            if (!inventoryItems.length) {
-                return res.status(400).json({ message: `Item ${itemName} (Batch: ${batch}) not found in inventory` });
-            }
+          // Check if sufficient stock exists
+          if (totalAvailableQuantity < parsedQuantity) {
+              return res.status(400).json({ message: `Insufficient stock for ${itemName} (Batch: ${batch}). Available: ${totalAvailableQuantity}, Requested: ${parsedQuantity}` });
+          }
 
-            // Calculate total available quantity across found inventory entries
-            const totalAvailableQuantity = inventoryItems.reduce((sum, inv) => sum + inv.quantity, 0);
-
-            // Check if sufficient stock exists
-            if (totalAvailableQuantity < parsedQuantity) {
-                return res.status(400).json({ message: `Insufficient stock for ${itemName} (Batch: ${batch}). Available: ${totalAvailableQuantity}, Requested: ${parsedQuantity}` });
-            }
-
-            // Deduct quantity from inventory items (FIFO based on sort)
-            let remainingQuantityToDeduct = parsedQuantity;
-            let actualExpiryDate = inventoryItems[0].expiryDate; // Get expiry from the first (oldest) inventory item
-            for (const inventoryItem of inventoryItems) {
-                if (remainingQuantityToDeduct <= 0) break;
-
-                const quantityToDeductFromThis = Math.min(remainingQuantityToDeduct, inventoryItem.quantity);
-                inventoryItem.quantity -= quantityToDeductFromThis;
-                remainingQuantityToDeduct -= quantityToDeductFromThis;
-
-                 // Decide whether to remove item or update quantity
-                 if (inventoryItem.quantity <= 0) {
-                     // Optional: Remove the inventory item if quantity is zero
-                     // await Inventory.findByIdAndDelete(inventoryItem._id);
-                     // Or just save it with quantity 0 if you prefer to keep the record
-                     await inventoryItem.save();
-                 } else {
-                     await inventoryItem.save(); // Save updated quantity
-                 }
-            }
-            // --- End Inventory Check & Update ---
-
-
-            // --- Prepare Item for Saving (Matching Schema) ---
-            // This object structure MUST match the Mongoose schema definition for `items`
-            processedItems.push({
-                itemName: itemName,
-                batch: batch,
-                quantity: parsedQuantity,
-                mrp: parsedMrp,
-                discount: parsedDiscount,
-                gstPercentage: parsedGstPercentage,
-                expiryDate: actualExpiryDate, // Use expiry from inventory
-                // Use the pre-calculated values sent from frontend
-                sgst: Number(sgst) || 0,
-                cgst: Number(cgst) || 0,
-                igst: Number(igst) || 0,
-                totalGst: parsedTotalGst, // Use totalGst from payload
-                netAmount: parsedNetAmount // Use netAmount from payload
-                // **Removed the extra 'amount: taxableValue' field**
-            });
-        } // End of item loop
-
-        // --- Create and Save Sale Bill ---
-        // Use the overall totals sent from the frontend payload
-        const newBill = new SaleBill({
-            saleInvoiceNumber, date, receiptNumber, partyName, email, gstNumber,
-            items: processedItems, // Use the correctly structured items
-            // Assign overall totals from the request body
-            totalAmount: feTotalAmount,
-            discountAmount: feDiscountAmount,
-            sgstAmount: feSgstAmount,
-            cgstAmount: feCgstAmount,
-            igstAmount: feIgstAmount,
-            totalGstAmount: feTotalGstAmount,
-            netAmount: feNetAmount
-        });
-
-        const savedBill = await newBill.save(); // Mongoose validation happens here
-        // --- End Create and Save Sale Bill ---
-
-
-        // --- Update Customer Purchase History (Optional) ---
-        try {
-             let customerPurchase = await CustomerPurchase.findOne({ gstNo: gstNumber, email: email }); // Added email scope
-             if (!customerPurchase) {
-                 customerPurchase = new CustomerPurchase({ gstNo: gstNumber, partyName, email, purchaseHistory: [] });
-             }
-
-             customerPurchase.purchaseHistory.push({
-                 date: new Date(),
-                 invoiceNumber: saleInvoiceNumber,
-                 items: processedItems.map(item => ({ // Map processed items for history
-                     itemName: item.itemName,
-                     batch: item.batch,
-                     quantity: item.quantity,
-                     rate: item.mrp, // Use MRP as rate?
-                     discount: item.discount,
-                     gstPercentage: item.gstPercentage,
-                     expiryDate: item.expiryDate,
-                     amount: item.netAmount // Use netAmount per item
-                 })),
-                 totalAmount: feNetAmount // Use overall net amount for this purchase record
-             });
-             await customerPurchase.save();
-             console.log(`Customer purchase history updated for GSTIN: ${gstNumber}`);
-        } catch(custError) {
-            // Log error but don't fail the entire sale if customer history update fails
-            console.error(`Error updating customer purchase history for ${gstNumber}:`, custError);
-        }
-        // --- End Update Customer Purchase History ---
-
-        // --- Emit real-time updates via WebSocket ---
-        try {
-          // Calculate today's and this month's sales totals
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const tomorrow = new Date(today);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          
-          const dailySales = await SaleBill.aggregate([
-            {
-              $match: {
-                email: email,
-                date: { $gte: today, $lt: tomorrow }
-              }
-            },
-            {
-              $group: {
-                _id: null,
-                totalAmount: { $sum: '$netAmount' }
-              }
-            }
-          ]);
-          
-          const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-          const firstDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-          
-          const monthlySales = await SaleBill.aggregate([
-            {
-              $match: {
-                email: email,
-                date: { $gte: firstDayOfMonth, $lt: firstDayOfNextMonth }
-              }
-            },
-            {
-              $group: {
-                _id: null,
-                totalAmount: { $sum: '$netAmount' }
-              }
-            }
-          ]);
-          
-          // Count unique customers this month
-          const uniqueCustomers = await SaleBill.distinct('partyName', {
-            email: email,
-            date: { $gte: firstDayOfMonth, $lt: firstDayOfNextMonth }
+          // Store inventory check result for this item
+          inventoryCheckResults.push({
+              itemName,
+              batch,
+              quantity: parsedQuantity,
+              inventoryItems
           });
-          
-          // Format currency values
-          const formatCurrency = (value) => {
-            return `₹${value.toLocaleString('en-IN')}`;
-          };
-          
-          // Emit dashboard update with sales data
-          emitToUser(email, SOCKET_EVENTS.DASHBOARD_UPDATE, {
-            dailySales: formatCurrency(dailySales.length > 0 ? dailySales[0].totalAmount : 0),
-            monthlySales: formatCurrency(monthlySales.length > 0 ? monthlySales[0].totalAmount : 0),
-            activeCustomers: uniqueCustomers.length,
+
+          // --- Prepare Item for Saving (Matching Schema) ---
+          // This object structure MUST match the Mongoose schema definition for `items`
+          processedItems.push({
+              itemName: itemName,
+              batch: batch,
+              quantity: parsedQuantity,
+              mrp: parsedMrp,
+              discount: parsedDiscount,
+              gstPercentage: parsedGstPercentage,
+              expiryDate: expiryDate, // Use the provided expiry date
+              // Use the pre-calculated values sent from frontend
+              sgst: Number(sgst) || 0,
+              cgst: Number(cgst) || 0,
+              igst: Number(igst) || 0,
+              totalGst: parsedTotalGst, // Use totalGst from payload
+              netAmount: parsedNetAmount // Use netAmount from payload
+          });
+      } // End of item loop
+
+      // --- Create and Save Sale Bill ---
+      // Use the overall totals sent from the frontend payload
+      const newBill = new SaleBill({
+          saleInvoiceNumber, date, receiptNumber, partyName, email, gstNumber,
+          items: processedItems, // Use the correctly structured items
+          // Assign overall totals from the request body
+          totalAmount: feTotalAmount,
+          discountAmount: feDiscountAmount,
+          sgstAmount: feSgstAmount,
+          cgstAmount: feCgstAmount,
+          igstAmount: feIgstAmount,
+          totalGstAmount: feTotalGstAmount,
+          netAmount: feNetAmount
+      });
+
+      // Save bill first, then update inventory 
+      const savedBill = await newBill.save();
+      console.log("Sale bill saved successfully:", savedBill._id);
+
+      // --- NEW: Use specialized inventory update function ---
+      // Prepare data structure for updateInventoryAfterSale
+      const saleData = {
+          email,
+          items: processedItems.map(item => ({
+              itemName: item.itemName,
+              batch: item.batch,
+              quantity: item.quantity
+          })),
+          billId: savedBill._id,  // Reference the bill that caused this update
+          date: new Date()
+      };
+
+      // Update inventory using the specialized function
+      let inventoryUpdates;
+      let inventoryUpdateSuccess = false;
+      try {
+          // Import the specialized function
+          const { updateInventoryAfterSale } = await import('../controllers/InventoryController.js');
+          inventoryUpdates = await updateInventoryAfterSale(saleData);
+          inventoryUpdateSuccess = true;
+          console.log("Inventory updated successfully after sale:", inventoryUpdates);
+      } catch (inventoryError) {
+          console.error("Error updating inventory after sale:", inventoryError);
+          // Don't fail the request since bill is created, but notify client
+          // This is important because the bill is already saved
+      }
+      // --- End Inventory Update ---
+
+      // --- Update Customer Purchase History (Optional) ---
+      let customerUpdateSuccess = false;
+      try {
+           let customerPurchase = await CustomerPurchase.findOne({ gstNo: gstNumber, email: email }); // Added email scope
+           if (!customerPurchase) {
+               customerPurchase = new CustomerPurchase({ gstNo: gstNumber, partyName, email, purchaseHistory: [] });
+           }
+
+           customerPurchase.purchaseHistory.push({
+               date: new Date(),
+               invoiceNumber: saleInvoiceNumber,
+               items: processedItems.map(item => ({ // Map processed items for history
+                   itemName: item.itemName,
+                   batch: item.batch,
+                   quantity: item.quantity,
+                   rate: item.mrp, // Use MRP as rate?
+                   discount: item.discount,
+                   gstPercentage: item.gstPercentage,
+                   expiryDate: item.expiryDate,
+                   amount: item.netAmount // Use netAmount per item
+               })),
+               totalAmount: feNetAmount // Use overall net amount for this purchase record
+           });
+           await customerPurchase.save();
+           customerUpdateSuccess = true;
+           console.log(`Customer purchase history updated for GSTIN: ${gstNumber}`);
+      } catch(custError) {
+          // Log error but don't fail the entire sale if customer history update fails
+          console.error(`Error updating customer purchase history for ${gstNumber}:`, custError);
+      }
+      // --- End Update Customer Purchase History ---
+
+      // --- Emit real-time updates via WebSocket ---
+      try {
+        // Calculate today's and this month's sales totals
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        const dailySales = await SaleBill.aggregate([
+          {
+            $match: {
+              email: email,
+              date: { $gte: today, $lt: tomorrow }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalAmount: { $sum: '$netAmount' }
+            }
+          }
+        ]);
+        
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const firstDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+        
+        const monthlySales = await SaleBill.aggregate([
+          {
+            $match: {
+              email: email,
+              date: { $gte: firstDayOfMonth, $lt: firstDayOfNextMonth }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalAmount: { $sum: '$netAmount' }
+            }
+          }
+        ]);
+        
+        // Count unique customers this month
+        const uniqueCustomers = await SaleBill.distinct('partyName', {
+          email: email,
+          date: { $gte: firstDayOfMonth, $lt: firstDayOfNextMonth }
+        });
+        
+        // Format currency values
+        const formatCurrency = (value) => {
+          return `₹${value.toLocaleString('en-IN')}`;
+        };
+        
+        // Emit dashboard update with sales data
+        emitToUser(email, SOCKET_EVENTS.DASHBOARD_UPDATE, {
+          dailySales: formatCurrency(dailySales.length > 0 ? dailySales[0].totalAmount : 0),
+          monthlySales: formatCurrency(monthlySales.length > 0 ? monthlySales[0].totalAmount : 0),
+          activeCustomers: uniqueCustomers.length,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Also emit an explicit inventory update event to ensure client is notified
+        if (inventoryUpdateSuccess) {
+          emitToUser(email, SOCKET_EVENTS.INVENTORY_UPDATE, {
+            message: 'Inventory updated after sale',
+            billId: savedBill._id,
+            updates: inventoryUpdates || [],
             timestamp: new Date().toISOString()
           });
-          
-          console.log(`Real-time dashboard update emitted for user: ${email}`);
-        } catch (wsError) {
-          // Don't fail the sale if WebSocket emission fails
-          console.error('Error emitting real-time updates:', wsError);
         }
-        // --- End WebSocket updates ---
+        
+        console.log(`Real-time dashboard update emitted for user: ${email}`);
+      } catch (wsError) {
+        // Don't fail the sale if WebSocket emission fails
+        console.error('Error emitting real-time updates:', wsError);
+      }
+      // --- End WebSocket updates ---
 
-        // --- Send Success Response ---
-        return res.status(201).json({
-            message: 'Sale bill created successfully',
-            bill: savedBill,
-            inventoryUpdated: true,
-            customerRecordUpdated: true // Indicate history update attempted/succeeded
-        });
+      // --- Send Success Response ---
+      return res.status(201).json({
+          message: 'Sale bill created successfully',
+          bill: savedBill,
+          inventoryUpdated: inventoryUpdateSuccess,
+          customerRecordUpdated: customerUpdateSuccess
+      });
 
-    } catch (error) {
-        // --- Handle Errors ---
-        console.error('Error creating sale bill:', error);
-        // Check for Mongoose validation errors specifically
-        if (error.name === 'ValidationError') {
-            // Extract meaningful messages from validation errors
-            const messages = Object.values(error.errors).map(val => val.message);
-            return res.status(400).json({ message: messages.join(', '), error: error.message });
-        }
-        // Generic server error
-        return res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
+  } catch (error) {
+      // --- Handle Errors ---
+      console.error('Error creating sale bill:', error);
+      // Check for Mongoose validation errors specifically
+      if (error.name === 'ValidationError') {
+          // Extract meaningful messages from validation errors
+          const messages = Object.values(error.errors).map(val => val.message);
+          return res.status(400).json({ message: messages.join(', '), error: error.message });
+      }
+      // Generic server error
+      return res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
 };
-
 
 
 
