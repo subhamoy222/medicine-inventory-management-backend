@@ -91,11 +91,17 @@ Edit
 PORT=3000
 MONGO_URI=your_mongodb_connection
 JWT_SECRET=your_jwt_secret
+
+---
+
 ▶️ Run the server
 bash
 Copy
 Edit
 npm start
+
+---
+
 🔐 Authentication
 JWT-based token authentication
 
@@ -103,13 +109,19 @@ Role protection middleware (isAdmin, isUser)
 
 Secure password storage with bcrypt
 
+---
+
 👨‍💻 Author
 Made with ❤️ by Subhamoy
 If you find this helpful, don’t forget to ⭐ the repo!
 
+---
+
 📢 Contributions & Issues
 Contributions are welcome!
 Please open an issue or PR if you find bugs or have suggestions.
+
+---
 
 🧠 Related Repositories
 👉 Check out the Frontend Repository for the complete system.
