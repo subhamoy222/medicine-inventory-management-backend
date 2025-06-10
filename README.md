@@ -82,7 +82,7 @@ Edit
 ## 🚀 Getting Started
 
 ### 🔧 Install dependencies
-```bash
+
 npm install
 ⚙️ Create a .env file
 ini
