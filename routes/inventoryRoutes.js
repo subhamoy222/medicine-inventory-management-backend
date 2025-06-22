@@ -162,6 +162,8 @@
 
 import express from 'express';
 import Inventory from '../models/Inventory.js';
+import rateLimit from 'express-rate-limit';
+import slowDown from 'express-slow-down';
 import { isAuthenticated } from '../middleware/authMiddleware.js'; // Assuming you use authentication
 import {
     addOrUpdateInventoryItem, // The main endpoint function
@@ -175,6 +177,227 @@ import {
 import Bill from '../models/Bill.js'; // Keep if needed for party name route
 
 const router = express.Router();
+
+
+const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: {
+        error: 'Too many requests from this IP',
+        retryAfter: '15 minutes',
+        limit: 100,
+        window: '15 minutes'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        console.log(`[RATE LIMIT] General limit exceeded for IP: ${req.ip}`);
+        res.status(429).json({
+            error: 'Rate limit exceeded',
+            message: 'Too many requests, please try again later.',
+            retryAfter: Math.round(req.rateLimit.resetTime / 1000),
+            limit: req.rateLimit.limit,
+            remaining: req.rateLimit.remaining
+        });
+    }
+});
+
+// 2. Strict Rate Limiter for Write Operations
+const strictWriteLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 20, // Only 20 write operations per minute
+    message: {
+        error: 'Too many write operations',
+        retryAfter: '1 minute',
+        limit: 20,
+        window: '1 minute'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        console.log(`[RATE LIMIT] Write operation limit exceeded for IP: ${req.ip}, Route: ${req.route.path}`);
+        res.status(429).json({
+            error: 'Write operation rate limit exceeded',
+            message: 'Too many inventory modifications, please slow down.',
+            retryAfter: Math.round(req.rateLimit.resetTime / 1000),
+            limit: req.rateLimit.limit,
+            remaining: req.rateLimit.remaining
+        });
+    }
+});
+
+// 3. Read Operations Rate Limiter
+const readLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 60, // 60 read operations per minute
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+// 4. Speed Limiter
+const speedLimiter = slowDown({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    delayAfter: 10, // Allow 10 requests per minute at full speed
+    delayMs: 500, // Add 500ms delay after delayAfter is reached
+    maxDelayMs: 3000, // Maximum delay of 3 seconds
+});
+
+// 5. Critical Operations Limiter
+const criticalLimiter = rateLimit({
+    windowMs: 10 * 1000, // 10 seconds
+    max: 5, // Only 5 requests per 10 seconds
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+// Rate limit logging middleware
+const rateLimitLogger = (req, res, next) => {
+    res.on('finish', () => {
+        const rateLimitHeaders = {
+            limit: res.get('RateLimit-Limit'),
+            remaining: res.get('RateLimit-Remaining'),
+            reset: res.get('RateLimit-Reset')
+        };
+        console.log(`[RATE LIMIT LOG] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - IP: ${req.ip} - Remaining: ${rateLimitHeaders.remaining}`);
+    });
+    next();
+};
+
+// Apply general rate limiting to all routes
+router.use(generalLimiter);
+router.use(rateLimitLogger);
+
+// ========== YOUR EXISTING ROUTES WITH RATE LIMITING ==========
+
+// READ OPERATIONS (Less restrictive)
+router.get('/', readLimiter, isAuthenticated, getInventory);
+router.get('/summary', readLimiter, isAuthenticated, getInventorySummary);
+router.get('/customer/:customerName', readLimiter, isAuthenticated, getCustomerPurchases);
+
+// WRITE OPERATIONS (More restrictive)
+router.post('/add-update', strictWriteLimiter, speedLimiter, isAuthenticated, addOrUpdateInventoryItem);
+router.post('/update-after-sale', strictWriteLimiter, speedLimiter, isAuthenticated, processSaleAndUpdateInventory);
+router.put('/update-party-names', strictWriteLimiter, isAuthenticated, updateInventoryPartyNames);
+
+// CRITICAL OPERATIONS (Most restrictive)
+router.post('/reset', criticalLimiter, strictWriteLimiter, isAuthenticated, resetInventory);
+
+// SEARCH OPERATIONS (Medium restrictive)
+router.get('/search', readLimiter, isAuthenticated, async (req, res) => {
+    const { itemName, batch, email } = req.query;
+    
+    if (!email) {
+        return res.status(400).json({ message: 'Email is required to search inventory' });
+    }
+    
+    try {
+        const query = { email };
+        if (itemName) query.itemName = { $regex: itemName, $options: 'i' };
+        if (batch) query.batch = { $regex: batch, $options: 'i' };
+
+        const inventoryItems = await Inventory.find(query);
+
+        if (!inventoryItems.length) {
+            return res.status(404).json({ message: 'No matching inventory items found' });
+        }
+        res.status(200).json(inventoryItems);
+    } catch (error) {
+        console.error('Error searching inventory:', error.message);
+        res.status(500).json({ message: 'Error searching inventory', error: error.message });
+    }
+});
+
+// PARTY NAMES ROUTE (Medium restrictive)
+router.get('/party-names/:email', readLimiter, isAuthenticated, async (req, res) => {
+    const { email } = req.params;
+    console.log('Fetching party names for email:', email);
+    
+    try {
+        const inventoryItems = await Inventory.find({ email }).select('partyName');
+        const purchaseBills = await Bill.find({ email, billType: 'purchase' }).select('partyName');
+        
+        const inventoryPartyNames = new Set(inventoryItems.map(item => item.partyName).filter(Boolean));
+        const purchaseBillPartyNames = new Set(purchaseBills.map(bill => bill.partyName).filter(Boolean));
+        
+        const allPartyNames = [...new Set([...inventoryPartyNames, ...purchaseBillPartyNames])].sort();
+        console.log('All unique party names:', allPartyNames);
+        res.status(200).json(allPartyNames);
+    } catch (error) {
+        console.error('Error fetching party names:', error.message);
+        res.status(500).json({ message: 'Error fetching party names', error: error.message });
+    }
+});
+
+// ========== TESTING ROUTES ==========
+
+// Test rate limiting functionality
+router.get('/test/rate-limit', (req, res) => {
+    const timestamp = new Date().toISOString();
+    const rateLimitInfo = {
+        ip: req.ip,
+        timestamp,
+        headers: {
+            limit: res.get('RateLimit-Limit'),
+            remaining: res.get('RateLimit-Remaining'),
+            reset: res.get('RateLimit-Reset'),
+            resetTime: new Date(parseInt(res.get('RateLimit-Reset')) * 1000).toISOString()
+        },
+        request: {
+            method: req.method,
+            url: req.originalUrl,
+            userAgent: req.get('User-Agent')
+        }
+    };
+    
+    console.log(`[RATE LIMIT TEST] Request #${100 - (parseInt(res.get('RateLimit-Remaining')) || 0)} at ${timestamp}`);
+    
+    res.json({
+        message: 'Rate limit test successful',
+        data: rateLimitInfo,
+        instructions: 'Make multiple rapid requests to this endpoint to test rate limiting'
+    });
+});
+
+// Check current rate limit status
+router.get('/test/rate-limit-status', (req, res) => {
+    res.json({
+        ip: req.ip,
+        rateLimits: {
+            general: {
+                limit: res.get('RateLimit-Limit'),
+                remaining: res.get('RateLimit-Remaining'),
+                reset: res.get('RateLimit-Reset'),
+                window: '15 minutes'
+            }
+        },
+        timestamp: new Date().toISOString(),
+        message: 'Current rate limit status'
+    });
+});
+
+// Intensive test route for write operations
+router.post('/test/intensive', strictWriteLimiter, isAuthenticated, (req, res) => {
+    const requestNumber = (req.headers['x-request-number'] || 'unknown');
+    console.log(`[INTENSIVE TEST] Processing request #${requestNumber}`);
+    
+    res.json({
+        message: `Intensive operation completed - Request #${requestNumber}`,
+        timestamp: new Date().toISOString(),
+        rateLimitRemaining: res.get('RateLimit-Remaining')
+    });
+});
+
+// Error handling middleware
+router.use((error, req, res, next) => {
+    if (error) {
+        console.error('[RATE LIMITER ERROR]', error);
+        res.status(500).json({
+            error: 'Internal server error in rate limiter',
+            message: error.message
+        });
+    }
+    next();
+});
 
 // --- Primary Inventory Routes ---
 
