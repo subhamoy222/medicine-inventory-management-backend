@@ -16,6 +16,7 @@ backend/config/.env
 .env.development
 .env.test
 .env.production
+.env.my-gcp-credentials.json
 
 # Build outputs
 build/
