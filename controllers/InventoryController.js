@@ -328,13 +328,6 @@ export const getInventory = async (req, res) => {
         // Enrich inventory with bill data (this will add missing party names)
         const enrichedInventory = await enrichInventoryWithBillData(inventoryItems, email);
         
-        // Emit the inventory data to the connected client via WebSocket
-        emitToUser(email, SOCKET_EVENTS.INVENTORY_UPDATE, {
-            count: enrichedInventory.length,
-            data: enrichedInventory,
-            timestamp: new Date().toISOString()
-        });
-        
         res.status(200).json(enrichedInventory);
     } catch (error) {
         console.error('[getInventory] Error:', error);
