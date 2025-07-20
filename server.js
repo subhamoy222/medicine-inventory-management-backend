@@ -4,6 +4,8 @@ import cors from 'cors';
 import connectDB from './config/db.js';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import path from 'path';
+import fs from 'fs';
 
 // Import Routes
 import userRoutes from './routes/userRoutes.js';
@@ -165,6 +167,17 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/expiry', expiryRoutes);
 app.use('/api/purchase-returns', purchaseReturnRoutes);
 app.use('/api/ocr-bill', ocrBillRoutes);
+
+// Serve PDF files for download
+app.get('/download/pdf/:invoiceNumber', (req, res) => {
+  const invoiceNumber = req.params.invoiceNumber;
+  const pdfPath = path.join(__dirname, 'pdfs', `${invoiceNumber}.pdf`);
+  if (fs.existsSync(pdfPath)) {
+    res.download(pdfPath, `${invoiceNumber}.pdf`);
+  } else {
+    res.status(404).json({ message: 'PDF not found' });
+  }
+});
 
 // Additional utility routes that might be needed
 app.get('/api/status', (req, res) => {

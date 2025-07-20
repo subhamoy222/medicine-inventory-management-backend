@@ -182,3 +182,121 @@ export const generatePurchaseReturnPDF = (returnBill) => {
         }
     });
 }; 
+
+export const generateSaleBillPDF = (saleBill) => {
+    return new Promise((resolve, reject) => {
+        try {
+            const doc = new PDFDocument({ margin: 50 });
+            const filename = `${saleBill.saleInvoiceNumber}.pdf`;
+            const filepath = path.join(pdfDirectory, filename);
+            const stream = fs.createWriteStream(filepath);
+            doc.pipe(stream);
+
+            // Header
+            doc.fontSize(20)
+               .fillColor('#1a237e')
+               .font('Helvetica-Bold')
+               .text('MEDICINE INVENTORY MANAGEMENT', { align: 'center' });
+            doc.moveDown();
+            doc.fontSize(16)
+               .fillColor('#0d47a1')
+               .text('Sales Invoice', { align: 'center' });
+
+            // Bill details
+            doc.moveDown();
+            doc.fontSize(12)
+               .fillColor('#000000')
+               .font('Helvetica');
+            const startX = 50;
+            let startY = doc.y;
+            const colWidth = (doc.page.width - 100) / 2;
+            doc.text('Invoice Number:', startX, startY)
+               .text(saleBill.saleInvoiceNumber, startX + 120, startY);
+            doc.text('Date:', startX + colWidth, startY)
+               .text(new Date(saleBill.date).toLocaleDateString(), startX + colWidth + 60, startY);
+            startY += 25;
+            doc.text('Party Name:', startX, startY)
+               .text(saleBill.partyName, startX + 120, startY);
+            doc.text('Receipt Number:', startX + colWidth, startY)
+               .text(saleBill.receiptNumber || '', startX + colWidth + 100, startY);
+            startY += 25;
+            doc.text('GST Number:', startX, startY)
+               .text(saleBill.gstNumber || '', startX + 120, startY);
+
+            // Items table
+            doc.moveDown(2);
+            startY = doc.y;
+            const tableHeaders = ['Item Name', 'Batch', 'Qty', 'MRP', 'Disc%', 'GST%', 'Amount'];
+            const tableWidths = [120, 60, 40, 60, 50, 50, 80];
+            doc.fillColor('#ffffff')
+               .rect(startX, startY, doc.page.width - 100, 25)
+               .fill();
+            let currentX = startX;
+            doc.fillColor('#1a237e');
+            tableHeaders.forEach((header, i) => {
+                doc.text(header, currentX + 5, startY + 7, {
+                    width: tableWidths[i],
+                    align: 'left'
+                });
+                currentX += tableWidths[i];
+            });
+            startY += 25;
+            doc.fillColor('#000000');
+            saleBill.items.forEach((item, index) => {
+                const isEvenRow = index % 2 === 0;
+                if (isEvenRow) {
+                    doc.fillColor('#f5f5f5')
+                       .rect(startX, startY, doc.page.width - 100, 25)
+                       .fill();
+                }
+                currentX = startX;
+                doc.fillColor('#000000');
+                doc.text(item.itemName, currentX + 5, startY + 7, { width: tableWidths[0] });
+                currentX += tableWidths[0];
+                doc.text(item.batch, currentX + 5, startY + 7, { width: tableWidths[1] });
+                currentX += tableWidths[1];
+                doc.text(item.quantity.toString(), currentX + 5, startY + 7, { width: tableWidths[2] });
+                currentX += tableWidths[2];
+                doc.text(item.mrp?.toFixed(2) || '', currentX + 5, startY + 7, { width: tableWidths[3] });
+                currentX += tableWidths[3];
+                doc.text(item.discount?.toString() || '', currentX + 5, startY + 7, { width: tableWidths[4] });
+                currentX += tableWidths[4];
+                doc.text(item.gstPercentage?.toString() || '', currentX + 5, startY + 7, { width: tableWidths[5] });
+                currentX += tableWidths[5];
+                doc.text(item.amount?.toFixed(2) || '', currentX + 5, startY + 7, { width: tableWidths[6] });
+                startY += 25;
+                if (startY > doc.page.height - 100) {
+                    doc.addPage();
+                    startY = 50;
+                }
+            });
+            // Totals
+            doc.moveDown();
+            const totalsStartY = startY + 20;
+            doc.font('Helvetica-Bold');
+            doc.fillColor('#e3f2fd')
+               .rect(doc.page.width - 250, totalsStartY, 200, 100)
+               .fill();
+            doc.fillColor('#000000');
+            doc.text('Total Amount:', doc.page.width - 240, totalsStartY + 10);
+            doc.text(saleBill.totalAmount?.toFixed(2) || '', doc.page.width - 100, totalsStartY + 10, { align: 'right' });
+            doc.text('Discount:', doc.page.width - 240, totalsStartY + 35);
+            doc.text(saleBill.discountAmount?.toFixed(2) || '', doc.page.width - 100, totalsStartY + 35, { align: 'right' });
+            doc.text('GST:', doc.page.width - 240, totalsStartY + 60);
+            doc.text(saleBill.totalGstAmount?.toFixed(2) || '', doc.page.width - 100, totalsStartY + 60, { align: 'right' });
+            doc.fillColor('#1a237e');
+            doc.text('Net Amount:', doc.page.width - 240, totalsStartY + 85);
+            doc.text(saleBill.netAmount?.toFixed(2) || '', doc.page.width - 100, totalsStartY + 85, { align: 'right' });
+            doc.moveDown(4);
+            doc.fontSize(10)
+               .fillColor('#666666')
+               .text('This is a computer generated document.', { align: 'center' });
+            doc.end();
+            stream.on('finish', () => {
+                resolve(filepath);
+            });
+        } catch (error) {
+            reject(error);
+        }
+    });
+}; 

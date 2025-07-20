@@ -9,6 +9,7 @@ import ReturnBill from '../models/ReturnBillModel.js';  // Fixed import path
 import { validateGSTNumber } from '../utils/validators.js';
 import { updateInventoryInternal } from './InventoryController.js';
 import { emitToUser, emitToAll, SOCKET_EVENTS } from '../utils/socketUtils.js';
+import { generateSaleBillPDF } from '../utils/pdfGenerator.js';
 
 
 
@@ -1102,12 +1103,22 @@ export const createSaleBill = async (req, res) => {
       }
       // --- End WebSocket updates ---
 
+      // Generate PDF
+      let pdfUrl = null;
+      try {
+        await generateSaleBillPDF(savedBill);
+        pdfUrl = `/download/pdf/${savedBill.saleInvoiceNumber}.pdf`;
+      } catch (pdfError) {
+        console.error('Error generating sale bill PDF:', pdfError);
+      }
+
       // --- Send Success Response ---
       return res.status(201).json({
           message: 'Sale bill created successfully',
           bill: savedBill,
           inventoryUpdated: inventoryUpdateSuccess,
-          customerRecordUpdated: customerUpdateSuccess
+          customerRecordUpdated: customerUpdateSuccess,
+          pdfUrl
       });
 
   } catch (error) {
