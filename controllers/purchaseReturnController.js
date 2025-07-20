@@ -3,6 +3,7 @@ import Bill from '../models/Bill.js';
 import Inventory from '../models/Inventory.js';
 import SaleBill from '../models/SaleBillModel.js';
 import { generatePurchaseReturnPDF } from '../utils/pdfGenerator.js';
+import { emitToAll, SOCKET_EVENTS } from '../utils/socketUtils.js';
 
 // Get returnable quantities for a supplier
 export const getReturnableQuantities = async (req, res) => {
@@ -368,6 +369,13 @@ export const createPurchaseReturnBill = async (req, res) => {
             // Commit the transaction
             await session.commitTransaction();
             session.endSession();
+
+            // Emit inventory update event to all clients after purchase return inventory updates
+            emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
+                message: 'Inventory updated after purchase return',
+                returnBillNumber: returnBill.returnInvoiceNumber,
+                timestamp: new Date().toISOString()
+            });
 
             // Generate PDF
             const pdfPath = await generatePurchaseReturnPDF(returnBill);

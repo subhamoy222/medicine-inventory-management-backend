@@ -3,7 +3,7 @@ import CustomerPurchase from '../models/CustomerPurchase.js';
 import Inventory from '../models/Inventory.js';
 import ReturnBill from '../models/ReturnBillSchema.js';
 import Bill from '../models/Bill.js';
-import { emitToUser, SOCKET_EVENTS } from '../utils/socketUtils.js';
+import { emitToUser, emitToAll, SOCKET_EVENTS } from '../utils/socketUtils.js';
 
 // --- Internal Core Logic Function (with enhanced logging) ---
 // Key function for updating inventory with explicit party name handling
@@ -138,6 +138,12 @@ async function updateInventoryInternalWithFixedPartyName(
 
             const savedUpdatedItem = await inventoryItem.save();
             console.log(`[updateInventoryInternal] Successfully SAVED updated item. ID: ${savedUpdatedItem._id}, Qty: ${originalQty} -> ${savedUpdatedItem.quantity}, Party: ${savedUpdatedItem.partyName}`);
+            // Emit real-time update to all clients
+            emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
+                message: 'Inventory item updated',
+                item: savedUpdatedItem,
+                timestamp: new Date().toISOString()
+            });
             return savedUpdatedItem;
 
         } else {
@@ -173,6 +179,12 @@ async function updateInventoryInternalWithFixedPartyName(
 
             const savedNewItem = await newInventoryItem.save();
             console.log(`[updateInventoryInternal] Successfully SAVED new item. ID: ${savedNewItem._id}, Qty: ${savedNewItem.quantity}, Party: ${savedNewItem.partyName}`);
+            // Emit real-time update to all clients
+            emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
+                message: 'New inventory item added',
+                item: savedNewItem,
+                timestamp: new Date().toISOString()
+            });
             return savedNewItem;
         }
 
@@ -249,8 +261,8 @@ export async function updateInventoryAfterSale(saleData) {
             });
         }
         
-        // Emit inventory update event
-        emitToUser(saleData.email, SOCKET_EVENTS.INVENTORY_UPDATE, {
+        // Emit inventory update event to all clients after all updates
+        emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
             message: 'Inventory updated after sale',
             updates,
             timestamp: new Date().toISOString()
@@ -261,7 +273,7 @@ export async function updateInventoryAfterSale(saleData) {
         console.error('[updateInventoryAfterSale] Error:', error);
         throw error;
     }
-}
+};
 
 // --- Endpoint Function for Sale Transaction ---
 export const processSaleAndUpdateInventory = async (req, res) => {

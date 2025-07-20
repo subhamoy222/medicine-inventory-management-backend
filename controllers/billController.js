@@ -1087,8 +1087,8 @@ export const createSaleBill = async (req, res) => {
         
         // Also emit an explicit inventory update event to ensure client is notified
         if (inventoryUpdateSuccess) {
-          emitToUser(email, SOCKET_EVENTS.INVENTORY_UPDATE, {
-            message: 'Inventory updated after sale',
+          emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
+            message: 'Inventory updated after sale bill',
             billId: savedBill._id,
             updates: inventoryUpdates || [],
             timestamp: new Date().toISOString()

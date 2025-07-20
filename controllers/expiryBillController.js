@@ -6,6 +6,7 @@ import ClientExpiryReturn from '../models/ClientExpiryReturn.js';
 import SaleBill from '../models/SaleBillModel.js';
 import mongoose from 'mongoose';
 import Bill from '../models/Bill.js';
+import { emitToAll, SOCKET_EVENTS } from '../utils/socketUtils.js';
 
 // Check for expiring items
 export const checkExpiringItems = async (req, res) => {
@@ -258,6 +259,12 @@ export const createClientExpiryReturn = async (req, res) => {
             success: true,
             data: savedExpiryReturn
         });
+        // Emit inventory update event to all clients after client expiry return inventory updates
+        emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
+            message: 'Inventory updated after client expiry return',
+            returnBillNumber: returnBillNumber,
+            timestamp: new Date().toISOString()
+        });
     } catch (error) {
         console.error('Error creating client expiry return:', error);
         res.status(400).json({ success: false, message: error.message });
@@ -492,6 +499,12 @@ export const createSupplierExpiryReturn = async (req, res) => {
         res.status(201).json({
             success: true,
             data: savedExpiryBill
+        });
+        // Emit inventory update event to all clients after supplier expiry return inventory updates
+        emitToAll(SOCKET_EVENTS.INVENTORY_UPDATE, {
+            message: 'Inventory updated after supplier expiry return',
+            expiryBillNumber: expiryBillNumber,
+            timestamp: new Date().toISOString()
         });
     } catch (error) {
         console.error('Error creating supplier expiry return:', error);
