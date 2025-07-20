@@ -1838,11 +1838,6 @@ export const getMedicineSalesDetails = async (req, res) => {
             email
         });
 
-        // Validate required fields
-        if (!medicineName) {
-            return res.status(400).json({ message: 'Medicine name is required' });
-        }
-
         // Build the base query
         const query = {
             $and: [
@@ -1851,12 +1846,16 @@ export const getMedicineSalesDetails = async (req, res) => {
                         { userId: userId },
                         { email: email }
                     ]
-                },
-                {
-                    'items.itemName': { $regex: new RegExp(medicineName, 'i') }
                 }
             ]
         };
+
+        // Only add medicineName filter if provided and not empty
+        if (medicineName && medicineName.trim() !== '') {
+            query.$and.push({
+                'items.itemName': { $regex: new RegExp(medicineName, 'i') }
+            });
+        }
 
         // Add date range filter if provided
         if (startDate || endDate) {
@@ -1907,9 +1906,11 @@ export const getMedicineSalesDetails = async (req, res) => {
         // Prepare detailed response
         const salesDetails = saleBills.map(bill => {
             // Find matching items in the bill
-            const matchingItems = bill.items.filter(item => 
-                item.itemName.toLowerCase().includes(medicineName.toLowerCase())
-            );
+            const matchingItems = (medicineName && medicineName.trim() !== '')
+                ? bill.items.filter(item => 
+                    item.itemName.toLowerCase().includes(medicineName.toLowerCase())
+                )
+                : bill.items;
 
             // Calculate totals for matching items
             matchingItems.forEach(item => {
@@ -1929,7 +1930,7 @@ export const getMedicineSalesDetails = async (req, res) => {
                 gstNo: item.gstNo || '',
                 batch: item.batch || ''
             }));
-        }).flat(); // Flatten the array of arrays
+        }).flat();
 
         res.status(200).json({
             totalSales: totalQuantity,
