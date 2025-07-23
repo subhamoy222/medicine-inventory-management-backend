@@ -10,6 +10,7 @@ import { validateGSTNumber } from '../utils/validators.js';
 import { updateInventoryInternal } from './InventoryController.js';
 import { emitToUser, emitToAll, SOCKET_EVENTS } from '../utils/socketUtils.js';
 import { generateSaleBillPDF } from '../utils/pdfGenerator.js';
+import { checkAndLockInventory, unlockInventory } from '../utils/inventoryLockUtils.js';
 
 
 
@@ -834,6 +835,7 @@ export const createPurchaseBill = async (req, res) => {
 
 // Modified createSaleBill function with improved inventory handling
 export const createSaleBill = async (req, res) => {
+  let lockedItems = [];
   try {
       // Destructure fields defined in the newer schema/payload
       const { saleInvoiceNumber, date, receiptNumber, partyName, items, gstNumber, // Top-level GST
@@ -943,6 +945,23 @@ export const createSaleBill = async (req, res) => {
               igst: Number(igst) || 0,
               totalGst: parsedTotalGst, // Use totalGst from payload
               netAmount: parsedNetAmount // Use netAmount from payload
+          });
+          // Lock inventory for each item before proceeding
+          await checkAndLockInventory({
+            itemName: itemName,
+            batch: batch,
+            quantity: Number(quantity),
+            lockedBy: req.user.email,
+            lockType: 'sale',
+            email: req.user.email,
+            InventoryModel: Inventory
+          });
+          lockedItems.push({
+            itemName: itemName,
+            batch: batch,
+            lockedBy: req.user.email,
+            lockType: 'sale',
+            email: req.user.email
           });
       } // End of item loop
 
@@ -1132,6 +1151,13 @@ export const createSaleBill = async (req, res) => {
       }
       // Generic server error
       return res.status(500).json({ message: 'Internal server error', error: error.message });
+  } finally {
+      // On error, unlock any locked items
+      if (lockedItems.length) {
+        for (const lock of lockedItems) {
+          await unlockInventory(lock);
+        }
+      }
   }
 };
 
@@ -1198,6 +1224,7 @@ export const getPurchaseHistory = async (req, res) => {
 };
 
 export const createReturnBill = async (req, res) => {
+    let lockedItems = [];
     try {
         // Initialize maps at the start using Map objects
         const soldItemsMap = new Map();
@@ -1426,6 +1453,26 @@ export const createReturnBill = async (req, res) => {
             );
         }
 
+        // Lock inventory for each item before proceeding
+        for (const item of items) {
+          await checkAndLockInventory({
+            itemName: item.itemName,
+            batch: item.batch,
+            quantity: Number(item.quantity),
+            lockedBy: req.user.email,
+            lockType: 'return',
+            email: req.user.email,
+            InventoryModel: Inventory
+          });
+          lockedItems.push({
+            itemName: item.itemName,
+            batch: item.batch,
+            lockedBy: req.user.email,
+            lockType: 'return',
+            email: req.user.email
+          });
+        }
+
         res.status(201).json({
             success: true,
             message: 'Return bill created successfully',
@@ -1438,6 +1485,13 @@ export const createReturnBill = async (req, res) => {
             errorType: error.name,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    } finally {
+        // On error, unlock any locked items
+        if (lockedItems.length) {
+          for (const lock of lockedItems) {
+            await unlockInventory(lock);
+          }
+        }
     }
 };
 
