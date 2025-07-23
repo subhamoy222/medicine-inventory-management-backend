@@ -175,6 +175,7 @@ import {
     processSaleAndUpdateInventory // New function for updating inventory after sale
 } from '../controllers/InventoryController.js';
 import Bill from '../models/Bill.js'; // Keep if needed for party name route
+import InventoryLock from '../models/InventoryLock.js';
 
 const router = express.Router();
 
@@ -273,6 +274,53 @@ router.use(rateLimitLogger);
 router.get('/', readLimiter, isAuthenticated, getInventory);
 router.get('/summary', readLimiter, isAuthenticated, getInventorySummary);
 router.get('/customer/:customerName', readLimiter, isAuthenticated, getCustomerPurchases);
+router.get('/available', readLimiter, isAuthenticated, async (req, res) => {
+  try {
+    const { email, itemName, batch } = req.query;
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required to fetch inventory' });
+    }
+    // Build the query
+    const query = { email };
+    if (itemName) query.itemName = { $regex: itemName, $options: 'i' };
+    if (batch) query.batch = batch;
+    // Fetch inventory items
+    const inventoryItems = await Inventory.find(query);
+    if (!inventoryItems.length) {
+      return res.status(404).json({ message: 'No inventory items found for the given criteria' });
+    }
+    // For each item, get locked quantity and calculate available
+    const results = await Promise.all(inventoryItems.map(async (item) => {
+      const locked = await InventoryLock.aggregate([
+        { $match: {
+          itemName: item.itemName,
+          batch: item.batch,
+          email: item.email,
+          expiresAt: { $gt: new Date() }
+        }},
+        { $group: { _id: null, totalLocked: { $sum: "$quantity" } } }
+      ]);
+      const lockedQuantity = locked[0]?.totalLocked || 0;
+      return {
+        itemName: item.itemName,
+        batch: item.batch,
+        quantity: item.quantity,
+        lockedQuantity,
+        availableQuantity: item.quantity - lockedQuantity,
+        mrp: item.mrp,
+        purchaseRate: item.purchaseRate,
+        expiryDate: item.expiryDate,
+        gstPercentage: item.gstPercentage,
+        partyName: item.partyName,
+        description: item.description
+      };
+    }));
+    res.status(200).json(results);
+  } catch (error) {
+    console.error('Error fetching available inventory:', error.message);
+    res.status(500).json({ message: 'Error fetching available inventory', error: error.message });
+  }
+});
 
 // WRITE OPERATIONS (More restrictive)
 router.post('/add-update', strictWriteLimiter, speedLimiter, isAuthenticated, addOrUpdateInventoryItem);
